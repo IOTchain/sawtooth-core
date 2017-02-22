@@ -22,7 +22,7 @@ import time
 from sawtooth_validator.journal.publisher import BlockPublisher
 from sawtooth_validator.journal.chain import ChainController
 from sawtooth_validator.journal.block_cache import BlockCache
-from sawtooth_validator.journal.block_store_adapter import BlockStoreAdapter
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ class Journal(object):
                  # prepopulated block cache.
                  ):
         self._consensus_module = consensus_module
-        self._block_store = BlockStoreAdapter(block_store)
+        self._block_store = block_store
         self._block_cache = block_cache
         if self._block_cache is None:
             self._block_cache = BlockCache(self._block_store)

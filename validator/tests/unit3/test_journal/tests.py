@@ -43,8 +43,8 @@ from test_journal.utils import wait_until
 
 from test_journal import mock_consensus
 
-LOGGER = logging.getLogger(__name__)
 
+LOGGER = logging.getLogger(__name__)
 
 
 class TestBlockCache(unittest.TestCase):
@@ -73,6 +73,7 @@ class TestBlockCache(unittest.TestCase):
 
         self.assertTrue("test" in bc)
         self.assertTrue(bc["test"] == "value")
+
 
 class TestBlockPublisher(unittest.TestCase):
     def setUp(self):
@@ -434,7 +435,7 @@ class TestJournal(unittest.TestCase):
         try:
             journal = Journal(
                 consensus_module=mock_consensus,
-                block_store=btm.block_store.store,
+                block_store=btm.block_store,
                 block_cache=btm.block_cache,
                 state_view_factory=StateViewFactory(DictDatabase()),
                 block_sender=self.block_sender,

@@ -20,14 +20,14 @@ from sawtooth_validator.journal.block_wrapper import BlockStatus
 from sawtooth_validator.journal.block_wrapper import BlockWrapper
 
 
-class BlockStoreAdapter(MutableMapping):
+class BlockStore(MutableMapping):
     """
-    A dict like interface wrapper around the block store to guarentee,
-    objects are correcty wrapped and unwrapped as they are stored and
-    retreived.
+    A dict like interface wrapper around the block store to guarantee,
+    objects are correctly wrapped and unwrapped as they are stored and
+    retrieved.
     """
-    def __init__(self, block_store):
-        self._block_store = block_store
+    def __init__(self, block_db):
+        self._block_store = block_db
 
     def __setitem__(self, key, value):
         self._block_store[key] = {
@@ -37,9 +37,11 @@ class BlockStoreAdapter(MutableMapping):
 
     def __getitem__(self, key):
         block = self._block_store[key]
-        return BlockWrapper(
-            status=BlockStatus.Valid,
-            **block)
+        if block is not None:
+            return BlockWrapper(
+                status=BlockStatus.Valid,
+                **block)
+        raise KeyError("Key {} not found.".format(key))
 
     def __delitem__(self, key):
         del self._block_store[key]
@@ -59,13 +61,31 @@ class BlockStoreAdapter(MutableMapping):
             out.append(str(v))
         return ','.join(out)
 
-    def set_chain_head(self, block_id):
+    def update_chain(self, new_chain, old_chain):
         """
         Set the current chain head, does not validate that the block
         store is in a valid state, ie that all the head block and all
         predecessors are in the store.
+
+        :param new_chain: The new block of the new chain.
+        :param old_chain: The block of the existing chain to remove from the
+        store.
+        :return:
+        None
         """
-        self._block_store["chain_head_id"] = block_id
+        add_pairs = []
+        del_keys = []
+        for v in new_chain:
+            ov = {
+                "block": v.block,
+                "weight": v.weight
+            }
+            add_pairs.append((v.identifier, ov))
+        for v in old_chain:
+            del_keys.append(v)
+        add_pairs.append(("chain_head_id", new_chain[0].identifier))
+
+        self._block_store.set_batch(add_pairs, del_keys)
 
     @property
     def chain_head(self):
