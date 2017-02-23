@@ -44,6 +44,16 @@ class BlockPublisher(object):
                  block_sender,
                  squash_handler,
                  chain_head):
+        """
+        Initialize the BlockPublisher object
+        :param consensus_module: The module containing the
+        :param transaction_executor:
+        :param block_cache:
+        :param state_view_factory:
+        :param block_sender:
+        :param squash_handler:
+        :param chain_head:
+        """
         self._lock = RLock()
         self._candidate_block = None  # the next block in potentia
         self._consensus_module = consensus_module  # the consensus module.
@@ -119,6 +129,7 @@ class BlockPublisher(object):
         :param block:
         :return:
         """
+        # lock so that we
         with self._lock:
             if self._chain_head is None:
                 # We are not ready to process batches
