@@ -23,10 +23,12 @@ from sawtooth_validator.execution.scheduler_exceptions import SchedulerError
 from sawtooth_validator.journal.block_builder import BlockBuilder
 from sawtooth_validator.journal.block_wrapper import BlockWrapper
 from sawtooth_validator.journal.block_wrapper import NULL_BLOCK_IDENTIFIER
+from sawtooth_validator.journal.chain import TransactionCache
 
 from sawtooth_validator.protobuf.block_pb2 import BlockHeader
 
 from sawtooth_validator.state.merkle import INIT_ROOT_KEY
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +58,9 @@ class BlockPublisher(object):
         """
         self._lock = RLock()
         self._candidate_block = None  # the next block in potentia
+        self._committed_txn = None  # Look-up cache for transactions that are
+        # committed in the current chain. Cache is used here so that we can
+        # support opportunistically building on top of a block we published.
         self._consensus_module = consensus_module  # the consensus module.
         self._consensus = None
         self._block_cache = block_cache
@@ -100,8 +105,18 @@ class BlockPublisher(object):
 
         self._transaction_executor.execute(self._scheduler)
         for batch in self._pending_batches:
-            self._scheduler.add_batch(batch)
-        self._pending_batches = []
+            self._validate_batch(batch)
+
+        # build the TransactionCache
+        self._committed_txn = TransactionCache()
+        if chain_head.header_signature not in self._block_cache.block_store:
+            # if we opportunistically building a block
+            # we need to check make sure we track that blocks transactions
+            # as recorded.
+            for batch in chain_head.block.batches:
+                for t in batch.transactions:
+                    self._committed_txn.add_txn(t.header_signature)
+
         return BlockBuilder(block_header)
 
     def _sign_block(self, block):
@@ -123,11 +138,39 @@ class BlockPublisher(object):
         block.set_signature(signature)
         return block
 
+    def _check_transaction_dependencies(self, txn):
+        for d in txn.dependencies:
+            if d not in self._committed_txn:
+                # Is this in pending transactions?
+                idx, x = next((idx, x for idx, x in
+                               enumerate(self._pending_batches) \
+                                if x.header_signature == d), None)
+                                if None) is None:
+                    LOGGER.debug("Transaction rejected due " +
+                                 "missing dependency, transaction " +
+                                 "{} depends on {}",
+                                 txn.header_signature, d)
+                    return
+        self._committed_txn.add_txn(txn.header_signature)
+
+    def _validate_batch(self, batch):
+        """Schedule validation of a batch for inclusion in the new block
+        :param batch: the batch to validate
+        :return: None
+        """
+        if self._scheduler:
+            try:
+                for t in batch.transactions:
+                    self._check_transaction_dependencies(t)
+                self._scheduler.add_batch(batch)
+            except SchedulerError as err:
+                LOGGER.debug("Scheduler error processing batch: %s", err)
+
     def on_batch_received(self, batch):
         """
         A new batch is received, send it for validation
-        :param block:
-        :return:
+        :param batch: the new pending batch
+        :return: None
         """
         # lock so that we
         with self._lock:
@@ -136,11 +179,7 @@ class BlockPublisher(object):
                 return
 
             self._pending_batches.append(batch)
-            if self._scheduler:
-                try:
-                    self._scheduler.add_batch(batch)
-                except SchedulerError:
-                    pass
+            self._validate_batch(batch)
 
     def on_chain_updated(self, chain_head,
                          committed_batches=None,
@@ -151,24 +190,27 @@ class BlockPublisher(object):
 
         chain_head: the new head of block_chain
         committed_batches:
-        uncommitted_batches: the list of transactions if any that are now
-            de-committed due to the switch in forks.
-
+        uncommitted_batches:
+        :param batch: the block that is now the chain head.
+        :param committed_batches: the set of batches that were committed
+         as part of the new chain.
+        :param uncommitted_batches: the list of transactions if any that are
+        now de-committed when the new chain was .
         :return:
         """
         try:
             with self._lock:
-                LOGGER.info(
-                    'Now building on top of block: %s',
-                    chain_head)
+                LOGGER.info('Now building on top of block: %s', chain_head)
+
                 self._chain_head = chain_head
+
                 if self._candidate_block is not None and \
                         chain_head is not None and \
                         chain_head.identifier == \
                         self._candidate_block.previous_block_id:
                     # nothing to do. We are building of the current head.
                     # This can happen after we publish a block and
-                    # speculatively create a new block.
+                    # opportunistically create a new block.
                     return
                 else:
                     # TBD -- we need to rebuild the pending transaction queue
